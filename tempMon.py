@@ -28,7 +28,7 @@ def send(s, commands):
 
 def setup(port, baudrate):
     print('Setting up...')
-    commands = [['RESET', '\x1A'], ['Echo On', 'ATE1'], ['Setup encoding to UTF-8', 'AT+CMGF=1']]
+    commands = [['RESET', '\x1A'], ['Echo On', 'ATE1'], ['Setup message service to text mode', 'AT+CMGF=1']]
     s = serial.Serial(port, baudrate)
     if (not s.is_open):
         print(f'Cannot open port {port} at baudrate {baudrate}')
