@@ -1,7 +1,24 @@
 from time import sleep
 import serial
-from gpiozero import CPUTemperature
 import threading
+import platform
+import io
+
+def getOS():
+    os = platform.system()
+    if os == 'Windows':
+        return 'Windows'
+    elif os == 'Linux':
+        try:
+            with io.open('/sys/firmware/devicetree/base/model', 'r') as m:
+                if 'raspberry pi' in m.read().lower(): return 'Pi'
+        except Exception: pass
+        return 'Linux'
+    else:
+        return os
+
+if getOS() == 'Pi':
+    from gpiozero import CPUTemperature
 
 def send(s, commands):
     s.flush()
@@ -13,25 +30,31 @@ def send(s, commands):
             continue
         else:
             s.write(f"{commands[i][1]}\r\n".encode('ascii'))
-        s.flush()
         print('Response: ')
         while True:
-            line = s.readline().decode('ascii')
-            if line != '\r\n':
-                print(line)
-            if line == 'ERROR\r\n' and commands[i][0] != 'RESET':
-                print('Received error, repeating...')
-                i = i - 1
-                continue
+            s.flush()
+            line = s.readline()
+            line = line.decode('ascii')
+            if line != '\r\n' and line != ' \r\n':
+                print(line, end="")
+            if line == 'ERROR\r\n':
+                if commands[i][2] == False:
+                    print('Received error, repeating...')
+                    i = i - 1
+                    continue
+                elif commands[i][2] == True:
+                    break
             if  line == 'OK\r\n' or line == '> \r\n' or line == '\r\n':
                 break
 
 def setup(port, baudrate):
     print('Setting up...')
-    commands = [['RESET', '\x1A'], ['Echo On', 'ATE1'], ['Setup message service to text mode', 'AT+CMGF=1']]
-    s = serial.Serial(port, baudrate)
-    if (not s.is_open):
-        print(f'Cannot open port {port} at baudrate {baudrate}')
+    commands = [['Echo On', 'ATE1', False], ['Setup message service to text mode', 'AT+CMGF=1', False]] # ['RESET', '\x1A', True], 
+    try:
+        s = serial.Serial(port, baudrate)
+    except Exception as error:
+        print(f'Cannot open port {port} at baudrate {baudrate} because an exception occuretd')
+        print(error)
         exit()
     print(f'Conencted to port {s.name}')
     s.reset_input_buffer()
@@ -42,7 +65,10 @@ def setup(port, baudrate):
 
 
 def tempMon(s, trigTemp, phoneNum, refreshRate, cooldown):
-    commands = [['Setup send SMS', 'AT+CMGS="PHONENUM"'], ['Send SMS messsage', 'EMPTY']]
+    if getOS() != 'Pi':
+        print('Cannot run temperature monitoring on a non Raspberry Pi device!')
+        exit()
+    commands = [['Setup send SMS', 'AT+CMGS="PHONENUM"', False], ['Send SMS messsage', 'EMPTY', False]]
     global cooldownActive
     cooldownActive = False
     print(f'Started CPU temperature monitoring. Will check every {refreshRate} s if the temperature is exceeding {trigTemp} °C and will contact {phoneNum} if it is. The alert cooldown is {cooldown} s.')
@@ -63,14 +89,34 @@ def resetCooldown():
     cooldownActive = False
     print("Cooldown expired")
 
+
+def measureSigQ(s, sigRepeat, sigDelay, pingIP, pingRepeat, pingDelay):
+    commands = [['Signal quality', 'AT+CESQ', False]]
+    for x in range(sigRepeat):
+        send(s, commands)
+        sleep(sigDelay)
+    send(s, commands=[['Ping', f'AT+PING="{pingIP}",{pingRepeat},32,{pingDelay},5', True]])
+
 def main():
-    port = '/dev/ttyACM0'
+    os = getOS()
+    print(f'Running on {os}')
+    if os == 'Windows':
+        port = 'COM8'
+    elif os == 'Linux' or os == 'Pi':
+        port = '/dev/ttyACM0'
+    else:
+        print("Unsupported platform!")
+        exit()
     baudrate = 115200
-    trigTemp = 80.0
+    trigTemp = 55.0
     phoneNum = '+PHONENUM'
     refreshRate = 1
     cooldown = 60
     s = setup(port, baudrate)
+
+    #for i in range(1, 2):
+    #    measureSigQ(s, 2, 1, '1.1.1.1', 5, i)
+
     tempMon(s, trigTemp, phoneNum, refreshRate, cooldown)
 
 if __name__ == '__main__':
